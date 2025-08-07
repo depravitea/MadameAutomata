@@ -10,14 +10,14 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Start HTTP ONLY if Railway gave us a PORT
+// Healthcheck (use Railway's dynamic PORT if set)
 const port = process.env.PORT;
 if (port) {
   http.createServer((_req, res) => { res.writeHead(200); res.end('OK'); })
     .listen(Number(port), () => console.log('Healthcheck HTTP on :', port));
 }
 
-// Prisma export for commands
+// Export prisma for commands
 export const prisma = new PrismaClient();
 
 // Discord client
@@ -43,6 +43,7 @@ if (fs.existsSync(commandsDir)) {
 }
 console.log('Loaded commands:', [...commands.keys()]);
 
+// Ready → register slash commands
 client.once(Events.ClientReady, async (c) => {
   console.log('Ready as', c.user.tag, '— registering slash commands…');
   const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN!);
@@ -86,10 +87,7 @@ console.log('Logging in…', {
   clientId: process.env.DISCORD_CLIENT_ID,
   guildId: process.env.GUILD_ID
 });
+
 client.login(process.env.DISCORD_TOKEN!)
   .then(() => console.log('LOGIN OK'))
   .catch((e) => console.error('LOGIN FAILED:', e));
-
-  .then(() => console.log('LOGIN OK'))
-  .catch((e) => console.error('LOGIN FAILED:', e));
-
