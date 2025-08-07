@@ -1,6 +1,13 @@
 import 'dotenv/config';
 import { Client, GatewayIntentBits, REST, Routes } from 'discord.js';
 import { PrismaClient } from '@prisma/client';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+// Fix __dirname in ESM
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 // Export prisma so commands can import it
 export const prisma = new PrismaClient();
@@ -15,16 +22,14 @@ const client = new Client({
   ]
 });
 
-// Load slash commands dynamically (if you have a commands folder)
-import fs from 'fs';
-import path from 'path';
+// Load slash commands dynamically
 const commands: any[] = [];
 const commandsPath = path.join(__dirname, 'commands');
 if (fs.existsSync(commandsPath)) {
   const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'));
   for (const file of commandFiles) {
     const filePath = path.join(commandsPath, file);
-    const command = await import(filePath);
+    const command = await import(`file://${filePath}`);
     if ('data' in command && 'execute' in command) {
       commands.push(command.data.toJSON());
     }
@@ -68,4 +73,5 @@ client.on('interactionCreate', async interaction => {
 
 // Login bot
 client.login(process.env.DISCORD_TOKEN);
+
 
