@@ -1,8 +1,8 @@
+import http from 'node:http';
 import { Client, GatewayIntentBits, Partials, Events, Collection, REST, Routes } from 'discord.js';
 import { CONFIG } from './config.js';
 import pino from 'pino';
 import { PrismaClient } from '@prisma/client';
-
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -15,8 +15,12 @@ console.log('Booting MadameAutomata… env:', {
   hasToken: !!process.env.DISCORD_TOKEN,
   tokenMask: mask(process.env.DISCORD_TOKEN),
   clientId: process.env.DISCORD_CLIENT_ID,
-  guildId: process.env.GUILD_ID,
+  guildId: process.env.GUILD_ID
 });
+// tiny HTTP server so Railway healthcheck passes
+const port = Number(process.env.PORT || 3000);
+http.createServer((_req, res) => { res.writeHead(200); res.end('OK'); })
+  .listen(port, () => console.log('Healthcheck HTTP on :', port));
 // ---------------------
 
 export const log = pino({ name: 'madameautomata' });
@@ -43,6 +47,7 @@ for (const file of (fs.existsSync(commandsDir) ? fs.readdirSync(commandsDir) : [
   const mod = await import(`./commands/${file}`);
   if (mod.data && mod.execute) commands.set(mod.data.name, mod);
 }
+console.log('Loaded commands:', [...commands.keys()]);
 
 client.once(Events.ClientReady, async (c) => {
   log.info({ user: c.user.tag }, 'Ready. Registering slash commands...');
@@ -78,10 +83,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
   }
 });
 
+console.log('Logging in…');
 try {
   await client.login(CONFIG.token);
   console.log('LOGIN OK');
 } catch (e) {
   console.error('LOGIN FAILED:', e);
-  process.exit(1);
+  // keep HTTP server alive so we see logs, but bail command loop
+  throw e;
 }
+
