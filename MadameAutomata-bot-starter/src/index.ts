@@ -26,7 +26,7 @@ const __dirname = path.dirname(__filename);
 const commandsDir = path.join(__dirname, 'commands');
 
 export const commands = new Collection<string, any>();
-for (const file of fs.existsSync(commandsDir) ? fs.readdirSync(commandsDir) : []) {
+for (const file of (fs.existsSync(commandsDir) ? fs.readdirSync(commandsDir) : [])) {
   if (!file.endsWith('.js') && !file.endsWith('.ts')) continue;
   const mod = await import(`./commands/${file}`);
   if (mod.data && mod.execute) {
