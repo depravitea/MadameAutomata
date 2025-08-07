@@ -6,9 +6,9 @@
   "scripts": {
     "prebuild": "rm -rf dist",
     "build": "tsc",
-    "prisma:gen": "prisma generate",
-    "prisma:push": "prisma db push",
-    "start": "npm run prisma:gen && npm run prisma:push && npm run build && node dist/index.js"
+    "postinstall": "prisma generate",
+    "prestart": "prisma db push",
+    "start": "node dist/index.js"
   },
   "dependencies": {
     "@prisma/client": "^5.22.0",
