@@ -1,77 +1,94 @@
 import 'dotenv/config';
-import { Client, GatewayIntentBits, REST, Routes } from 'discord.js';
+import http from 'node:http';
+import { Client, GatewayIntentBits, Partials, Events, REST, Routes, Collection } from 'discord.js';
 import { PrismaClient } from '@prisma/client';
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-// Fix __dirname in ESM
+// ----- ESM __dirname fix -----
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Export prisma so commands can import it
+// ----- Export prisma for commands -----
 export const prisma = new PrismaClient();
 
-// Create Discord client
+// ----- Keep Railway happy (healthcheck HTTP) -----
+const port = Number(process.env.PORT || 8080);
+http.createServer((_req, res) => { res.writeHead(200); res.end('OK'); })
+  .listen(port, () => console.log('Healthcheck HTTP on :', port));
+
+// ----- Discord client -----
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent,
-    GatewayIntentBits.GuildMembers
-  ]
+    GatewayIntentBits.MessageContent
+  ],
+  partials: [Partials.Channel, Partials.GuildMember, Partials.Message]
 });
 
-// Load slash commands dynamically
-const commands: any[] = [];
-const commandsPath = path.join(__dirname, 'commands');
-if (fs.existsSync(commandsPath)) {
-  const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'));
-  for (const file of commandFiles) {
-    const filePath = path.join(commandsPath, file);
-    const command = await import(`file://${filePath}`);
-    if ('data' in command && 'execute' in command) {
-      commands.push(command.data.toJSON());
-    }
+// ----- Dynamic command loader (dist/commands/*.js) -----
+export const commands = new Collection<string, any>();
+const commandsDir = path.join(__dirname, 'commands');
+if (fs.existsSync(commandsDir)) {
+  const files = fs.readdirSync(commandsDir).filter(f => f.endsWith('.js'));
+  for (const file of files) {
+    const mod = await import(`file://${path.join(commandsDir, file)}`);
+    if (mod.data && mod.execute) commands.set(mod.data.name, mod);
   }
 }
+console.log('Loaded commands:', [...commands.keys()]);
 
-// Register slash commands
-const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN!);
-
-(async () => {
+// ----- Ready → register slash commands -----
+client.once(Events.ClientReady, async (c) => {
+  console.log('Ready as', c.user.tag, '— registering slash commands…');
+  const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN!);
+  const body = [...commands.values()].map(cmd => cmd.data.toJSON());
   try {
-    console.log('Registering slash commands...');
-    await rest.put(
-      Routes.applicationGuildCommands(process.env.CLIENT_ID!, process.env.GUILD_ID!),
-      { body: commands }
-    );
-    console.log('Slash commands registered.');
-  } catch (error) {
-    console.error(error);
-  }
-})();
-
-// Bot ready event
-client.once('ready', () => {
-  console.log(`✅ Logged in as ${client.user?.tag}`);
-});
-
-// Command handler
-client.on('interactionCreate', async interaction => {
-  if (!interaction.isChatInputCommand()) return;
-  const commandFile = await import(`./commands/${interaction.commandName}.js`).catch(() => null);
-  if (commandFile && commandFile.execute) {
-    try {
-      await commandFile.execute(interaction);
-    } catch (error) {
-      console.error(error);
-      await interaction.reply({ content: '❌ There was an error executing this command.', ephemeral: true });
+    if (process.env.GUILD_ID) {
+      await rest.put(
+        Routes.applicationGuildCommands(process.env.DISCORD_CLIENT_ID!, process.env.GUILD_ID),
+        { body }
+      );
+      console.log('Registered guild commands.');
+    } else {
+      await rest.put(
+        Routes.applicationCommands(process.env.DISCORD_CLIENT_ID!),
+        { body }
+      );
+      console.log('Registered global commands.');
     }
+  } catch (e) {
+    console.error('COMMAND REGISTRATION FAILED:', e);
+  }
+  console.log('✅ MadameAutomata is online.');
+});
+
+// ----- Interaction handler -----
+client.on(Events.InteractionCreate, async (interaction) => {
+  if (!interaction.isChatInputCommand()) return;
+  const command = commands.get(interaction.commandName);
+  if (!command) return;
+  try { await command.execute(interaction); }
+  catch (e) {
+    console.error(e);
+    if (interaction.replied || interaction.deferred)
+      await interaction.followUp({ content: 'Something went wrong.', ephemeral: true });
+    else
+      await interaction.reply({ content: 'Something went wrong.', ephemeral: true });
   }
 });
 
-// Login bot
-client.login(process.env.DISCORD_TOKEN);
-
-
+// ----- Login with loud diagnostics -----
+process.on('unhandledRejection', (e)=>console.error('UNHANDLED REJECTION:', e));
+process.on('uncaughtException', (e)=>console.error('UNCAUGHT EXCEPTION:', e));
+console.log('Logging in…', {
+  hasToken: !!process.env.DISCORD_TOKEN,
+  clientId: process.env.DISCORD_CLIENT_ID,
+  guildId: process.env.GUILD_ID
+});
+client.login(process.env.DISCORD_TOKEN!)
+  .then(() => console.log('LOGIN OK'))
+  .catch((e) => console.error('LOGIN FAILED:', e));
